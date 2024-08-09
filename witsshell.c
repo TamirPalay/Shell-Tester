@@ -7,16 +7,26 @@
 #include <fcntl.h>
 
 // Function to execute a command
-void execute_command(char *line) {
+void execute_command(char *line, char **path) {
     char *args[100]; // Array to hold command arguments
     int i = 0;
+    char *filename = NULL;
+    bool redirect = false;
 
-    // Tokenize the input line into arguments
-    args[i] = strtok(line, " ");
-    while (args[i] != NULL) {
-        i++;
-        args[i] = strtok(NULL, " ");
+    // Tokenize the input line into arguments using strsep
+    while ((args[i] = strsep(&line, " ")) != NULL) {
+        if (strlen(args[i]) > 0) {
+            if (strcmp(args[i], ">") == 0) {
+                redirect = true;
+                printf("Redirecting output to file\n");
+                args[i] = NULL; // Null-terminate the array before the redirection symbol
+                filename = strsep(&line, " ");
+                break;
+            }
+            i++;
+        }
     }
+    args[i] = NULL; // Null-terminate the array
 
     // If no command is entered, return
     if (args[0] == NULL) {
@@ -28,13 +38,77 @@ void execute_command(char *line) {
         exit(0);
     }
 
+    // If the command is "cd", change the current working directory
+    if (strcmp(args[0], "cd") == 0) {
+        if (args[1] == NULL || args[2] != NULL) {
+            // If no directory is specified or more than one argument is provided, print an error message
+            fprintf(stderr, "cd: wrong number of arguments\n");
+        } else {
+            // Change the directory using chdir
+            if (chdir(args[1]) != 0) {
+                // If chdir fails, print an error message
+                perror("chdir");
+            }
+            printf("now in directory: %s\n", args[1]);
+        }
+        return;
+    }
+
+    // If the command is "path", update the search path
+    if (strcmp(args[0], "path") == 0) {
+        // Update the search path with the directories specified in the arguments
+        for (int j = 1; j < i; j++) {
+            path[j - 1] = args[j];
+        }
+        path[i - 1] = NULL; // Null-terminate the array
+        // Print the updated path
+        printf("Updated path: ");
+        for (int j = 0; path[j] != NULL; j++) {
+            printf("%s ", path[j]);
+        }
+        printf("\n");
+        // Handle the case where the path is set to be empty
+        if (i == 1) {
+            printf("Path is empty. Only built-in commands will work.\n");
+        }
+        return;
+    }
+
+    // Search for the executable in the directories specified by path
+    char executable[1024];
+    for (i = 0; path[i] != NULL; i++) {
+        snprintf(executable, sizeof(executable), "%s/%s", path[i], args[0]);
+        if (access(executable, X_OK) == 0) {
+            args[0] = executable;
+            break;
+        }
+    }
+
+    // If the executable is not found, print an error message and return
+    if (path[i] == NULL) {
+        fprintf(stderr, "Command not found: %s\n", args[0]);
+        return;
+    }
+
     // Create a new process to execute the command
     pid_t pid = fork();
     if (pid == 0) {
-        // In the child process, execute the command
-        execvp(args[0], args);
-        // If execvp fails, print an error message and exit
-        perror("execvp");
+        // In the child process, handle redirection if needed
+        if (redirect && filename != NULL) {
+            int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+        }
+
+        // Execute the command
+        execv(args[0], args);
+        // If execv fails, print an error message and exit
+        perror("execv");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
         // In the parent process, wait for the child to finish
@@ -50,6 +124,9 @@ int main(int argc, char *argv[]) {
     size_t len = 0; // Length of the input line
     ssize_t nread; // Number of characters read
     FILE *input = stdin; // Input source (default is stdin)
+
+    // Initialize the search path with /bin/
+    char *path[] = { "/bin", NULL };
 
     // If a file is provided as an argument, open it for reading
     if (argc > 1) {
@@ -86,7 +163,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Execute the command
-        execute_command(line);
+        execute_command(line, path);
     }
 
     // Free the allocated memory for the input line
