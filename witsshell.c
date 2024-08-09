@@ -6,8 +6,15 @@
 #include <string.h>
 #include <fcntl.h>
 
-// Function to execute a command
-void execute_command(char *line, char **path) {
+char error_message[30] = "An error has occurred\n";
+
+// Function to print the error message
+void print_error() {
+    write(STDERR_FILENO, error_message, strlen(error_message));
+}
+
+// Function to execute a single command
+void execute_single_command(char *line, char **path) {
     char *args[100]; // Array to hold command arguments
     int i = 0;
     char *filename = NULL;
@@ -18,7 +25,6 @@ void execute_command(char *line, char **path) {
         if (strlen(args[i]) > 0) {
             if (strcmp(args[i], ">") == 0) {
                 redirect = true;
-                printf("Redirecting output to file\n");
                 args[i] = NULL; // Null-terminate the array before the redirection symbol
                 filename = strsep(&line, " ");
                 break;
@@ -42,12 +48,12 @@ void execute_command(char *line, char **path) {
     if (strcmp(args[0], "cd") == 0) {
         if (args[1] == NULL || args[2] != NULL) {
             // If no directory is specified or more than one argument is provided, print an error message
-            fprintf(stderr, "cd: wrong number of arguments\n");
+            print_error();
         } else {
             // Change the directory using chdir
             if (chdir(args[1]) != 0) {
                 // If chdir fails, print an error message
-                perror("chdir");
+                print_error();
             }
             printf("now in directory: %s\n", args[1]);
         }
@@ -86,7 +92,7 @@ void execute_command(char *line, char **path) {
 
     // If the executable is not found, print an error message and return
     if (path[i] == NULL) {
-        fprintf(stderr, "Command not found: %s\n", args[0]);
+        print_error();
         return;
     }
 
@@ -97,7 +103,7 @@ void execute_command(char *line, char **path) {
         if (redirect && filename != NULL) {
             int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
-                perror("open");
+                print_error();
                 exit(EXIT_FAILURE);
             }
             dup2(fd, STDOUT_FILENO);
@@ -108,14 +114,53 @@ void execute_command(char *line, char **path) {
         // Execute the command
         execv(args[0], args);
         // If execv fails, print an error message and exit
-        perror("execv");
+        print_error();
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
         // In the parent process, wait for the child to finish
-        wait(NULL);
+        waitpid(pid, NULL, 0);
     } else {
         // If fork fails, print an error message
-        perror("fork");
+        print_error();
+    }
+}
+
+// Function to execute multiple commands in parallel
+void execute_parallel_commands(char *line, char **path) {
+    char *commands[100]; // Array to hold individual commands
+    int i = 0;
+
+    // Tokenize the input line into individual commands using strsep
+    while ((commands[i] = strsep(&line, "&")) != NULL) {
+        if (strlen(commands[i]) > 0) {
+            i++;
+        }
+    }
+    commands[i] = NULL; // Null-terminate the array
+
+    // Array to hold process IDs of child processes
+    pid_t pids[100];
+    int num_commands = i;
+
+    // Execute each command in a separate child process
+    for (i = 0; i < num_commands; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // In the child process, execute the command
+            execute_single_command(commands[i], path);
+            exit(EXIT_SUCCESS);
+        } else if (pid > 0) {
+            // In the parent process, store the child's PID
+            pids[i] = pid;
+        } else {
+            // If fork fails, print an error message
+            print_error();
+        }
+    }
+
+    // Wait for all child processes to complete
+    for (i = 0; i < num_commands; i++) {
+        waitpid(pids[i], NULL, 0);
     }
 }
 
@@ -128,12 +173,18 @@ int main(int argc, char *argv[]) {
     // Initialize the search path with /bin/
     char *path[] = { "/bin", NULL };
 
+    // If more than one file is provided as an argument, print an error message and exit
+    if (argc > 2) {
+        print_error();
+        exit(1);
+    }
+
     // If a file is provided as an argument, open it for reading
-    if (argc > 1) {
+    if (argc == 2) {
         input = fopen(argv[1], "r");
         if (input == NULL) {
-            perror("fopen");
-            exit(EXIT_FAILURE);
+            print_error();
+            exit(1);
         }
     }
 
@@ -152,7 +203,7 @@ int main(int argc, char *argv[]) {
                 break;
             } else {
                 // If an error occurs, print an error message and break the loop
-                perror("getline");
+                print_error();
                 break;
             }
         }
@@ -162,8 +213,14 @@ int main(int argc, char *argv[]) {
             line[nread - 1] = '\0';
         }
 
-        // Execute the command
-        execute_command(line, path);
+        // Check if the line contains parallel commands
+        if (strstr(line, "&") != NULL) {
+            // Execute parallel commands
+            execute_parallel_commands(line, path);
+        } else {
+            // Execute a single command
+            execute_single_command(line, path);
+        }
     }
 
     // Free the allocated memory for the input line
