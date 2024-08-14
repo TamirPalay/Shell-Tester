@@ -7,6 +7,13 @@
 #include <fcntl.h>
 #include <dirent.h>
 
+
+// all: witsshell
+
+// witsshell: witsshell.c
+// 	gcc witsshell.c -Wall -Wextra -pedantic -o witsshell
+// clean:
+// 	rm -f witsshell
 char error_message[30] = "An error has occurred\n";
 char *PATH_LIST[100] = { "/bin", NULL }; // Initialize PATH_LIST with /bin
 
@@ -16,23 +23,23 @@ void print_error() {
 }
 
 // Function to execute the `ls` command
-void execute_ls_command() {
-    struct dirent **namelist;
-    int n;
+// void execute_ls_command() {
+//     struct dirent **namelist;
+//     int n;
 
-    n = scandir(".", &namelist, NULL, alphasort);
-    if (n < 0) {
-        print_error();
-    } else {
-        for (int i = 0; i < n; i++) {
-            if (namelist[i]->d_name[0] != '.') {
-                printf("%s\n", namelist[i]->d_name);
-            }
-            free(namelist[i]);
-        }
-        free(namelist);
-    }
-}
+//     n = scandir(".", &namelist, NULL, alphasort);
+//     if (n < 0) {
+//         print_error();
+//     } else {
+//         for (int i = 0; i < n; i++) {
+//             if (namelist[i]->d_name[0] != '.') {
+//                 printf("%s\n", namelist[i]->d_name);
+//             }
+//             free(namelist[i]);
+//         }
+//         free(namelist);
+//     }
+// }
 
 // Function to execute a single command
 void execute_single_command(char *line, char **path) {
@@ -40,6 +47,7 @@ void execute_single_command(char *line, char **path) {
     int i = 0;
     char *filename = NULL;
     bool redirect = false;
+    bool background = false;
 
     // Tokenize the input line into arguments using strsep
     while ((args[i] = strsep(&line, " ")) != NULL) {
@@ -48,6 +56,10 @@ void execute_single_command(char *line, char **path) {
                 redirect = true;
                 args[i] = NULL; // Null-terminate the array before the redirection symbol
                 filename = strsep(&line, " ");
+                break;
+            } else if (strcmp(args[i], "&") == 0) {
+                background = true;
+                args[i] = NULL; // Null-terminate the array before the background symbol
                 break;
             }
             i++;
@@ -76,7 +88,6 @@ void execute_single_command(char *line, char **path) {
                 // If chdir fails, print an error message
                 print_error();
             }
-            printf("now in directory: %s\n", args[1]);
         }
         return;
     }
@@ -96,18 +107,13 @@ void execute_single_command(char *line, char **path) {
         return;
     }
 
-    // If the command is "ls", execute the ls command
-    if (strcmp(args[0], "ls") == 0) {
-        execute_ls_command();
-        return;
-    }
-
     // Search for the executable in the directories specified by path
     char executable[1024];
+    char *temp;
     for (i = 0; path[i] != NULL; i++) {
         snprintf(executable, sizeof(executable), "%s/%s", path[i], args[0]);
         if (access(executable, X_OK) == 0) {
-            args[0] = executable;
+            temp = executable;
             break;
         }
     }
@@ -134,13 +140,15 @@ void execute_single_command(char *line, char **path) {
         }
 
         // Execute the command
-        execv(args[0], args);
+        execv(temp, args);
         // If execv fails, print an error message and exit
         print_error();
         exit(EXIT_FAILURE);
     } else if (pid > 0) {
-        // In the parent process, wait for the child to finish
-        waitpid(pid, NULL, 0);
+        // In the parent process, wait for the child to finish if not running in the background
+        if (!background) {
+            waitpid(pid, NULL, 0);
+        }
     } else {
         // If fork fails, print an error message
         print_error();
@@ -182,7 +190,10 @@ void execute_parallel_commands(char *line, char **path) {
 
     // Wait for all child processes to complete
     for (i = 0; i < num_commands; i++) {
-        waitpid(pids[i], NULL, 0);
+        // Check if the command is meant to run in the background
+        if (strstr(commands[i], "&") == NULL) {
+            waitpid(pids[i], NULL, 0);
+        }
     }
 }
 
