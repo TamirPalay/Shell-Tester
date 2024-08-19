@@ -14,9 +14,10 @@
 // 	gcc witsshell.c -Wall -Wextra -pedantic -o witsshell
 // clean:
 // 	rm -f witsshell
-char error_message[30] = "An error has occurred\n";
-char *PATH_LIST[100] = { "/bin", NULL }; // Initialize PATH_LIST with /bin
 
+char error_message[30] = "An error has occurred\n";
+//char *PATH_LIST[100] = { "/bin", NULL }; // Initialize PATH_LIST with /bin
+int pathsize;
 // Function to print the error message
 void print_error() {
     write(STDERR_FILENO, error_message, strlen(error_message));
@@ -50,21 +51,32 @@ void execute_single_command(char *line, char **path) {
     bool background = false;
 
     // Tokenize the input line into arguments using strsep
-    while ((args[i] = strsep(&line, " ")) != NULL) {
-        if (strlen(args[i]) > 0) {
-            if (strcmp(args[i], ">") == 0) {
-                redirect = true;
-                args[i] = NULL; // Null-terminate the array before the redirection symbol
-                filename = strsep(&line, " ");
-                break;
-            } else if (strcmp(args[i], "&") == 0) {
-                background = true;
-                args[i] = NULL; // Null-terminate the array before the background symbol
-                break;
+while ((args[i] = strsep(&line, " ")) != NULL) {
+    if (strlen(args[i]) > 0) {
+        if (strcmp(args[i], ">") == 0) {
+            // Check if an argument was given
+            
+            if (args[i + 1] == NULL ) {
+                print_error();
+                return;
             }
-            i++;
+            // Check if multiple arguments were given
+            // if (args[i + 2] != NULL && strlen(args[i + 2]) > 0) {
+            //     print_error();
+            //     return;
+            // }
+            redirect = true;
+            args[i] = NULL; // Null-terminate the array before the redirection symbol
+            filename = args[i + 1]; // Set the filename for redirection
+            break;
+        } else if (strcmp(args[i], "&") == 0) {
+            background = true;
+            args[i] = NULL; // Null-terminate the array before the background symbol
+            break;
         }
+        i++;
     }
+}
     args[i] = NULL; // Null-terminate the array
 
     // If no command is entered, return
@@ -74,6 +86,9 @@ void execute_single_command(char *line, char **path) {
 
     // If the command is "exit", terminate the shell
     if (strcmp(args[0], "exit") == 0) {
+        if(args[1]!=NULL){
+            print_error();
+        }
         exit(0);
     }
 
@@ -89,29 +104,33 @@ void execute_single_command(char *line, char **path) {
                 print_error();
             }
         }
+        // for(int k=0; k<100; k++){
+        //     printf("Path: %s",path[k]);
+        // }
         return;
     }
 
     // If the command is "path", update the search path
-    if (strcmp(args[0], "path") == 0) {
+     if (strcmp(args[0], "path") == 0) {
         // Clear the PATH_LIST if no arguments are provided
         if (args[1] == NULL) {
             path[0] = NULL;
         } else {
             // Update the search path with the directories specified in the arguments
-            for (int j = 1; j < i; j++) {
+            int j;
+            for (j = 1; args[j] != NULL; j++) {
                 path[j - 1] = args[j];
             }
-            path[i - 1] = NULL; // Null-terminate the array
+            path[j - 1] = NULL; // Null-terminate the array
         }
         return;
     }
 
     // Search for the executable in the directories specified by path
     char executable[1024];
-    char *temp;
+    char *temp=NULL;
     for (i = 0; path[i] != NULL; i++) {
-        snprintf(executable, sizeof(executable), "%s/%s", path[i], args[0]);
+       snprintf(executable, sizeof(executable), "%s/%s", path[i], args[0]);
         if (access(executable, X_OK) == 0) {
             temp = executable;
             break;
@@ -119,7 +138,7 @@ void execute_single_command(char *line, char **path) {
     }
 
     // If the executable is not found, print an error message and return
-    if (path[i] == NULL) {
+    if (temp == NULL) {
         print_error();
         return;
     }
@@ -129,6 +148,18 @@ void execute_single_command(char *line, char **path) {
     if (pid == 0) {
         // In the child process, handle redirection if needed
         if (redirect && filename != NULL) {
+                    // Ensure the directory for the output file exists
+        // char *dir = strdup(filename);
+        // char *last_slash = strrchr(dir, '/');
+        // if (last_slash != NULL) {
+        //     *last_slash = '\0';
+        //     if (access(dir, F_OK) != 0) {
+        //         print_error();
+        //         free(dir);
+        //         exit(EXIT_FAILURE);
+        //     }
+        // }
+        // free(dir);
             int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0) {
                 print_error();
@@ -205,6 +236,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize the search path with /bin/
     char *path[100] = { "/bin", NULL };
+    
 
     // If more than one file is provided as an argument, print an error message and exit
     if (argc > 2) {
