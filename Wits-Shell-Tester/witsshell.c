@@ -273,8 +273,22 @@ void execute_single_command(char *line, char **path) {
             print_error();
             return;
         }
+              if (redirect) { // Check if a filename has already been set
+                print_error();
+                return;
+            }
             redirect = true;
             filename = token; // Set the filename for redirection
+            //args[i]=NULL;
+            token = strtok(NULL, " ");
+if (token != NULL) {
+                // If there are more tokens after the filename, it's an error
+                print_error();
+                return;
+            }
+
+
+
             break;
         } else if (strcmp(token, "&") == 0) {
             background = true;
